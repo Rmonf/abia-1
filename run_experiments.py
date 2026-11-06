@@ -37,8 +37,8 @@ BASE_CUST_PROPS = (0.25, 0.30, 0.45)
 BASE_GUARANTEED_PROP = 0.75
 REPLICAS = 10
 RANDOM_REPS = 5  # ejecuciones de la solución aleatoria por semilla en el Exp. 2
-# Parámetros de SA si se lanzan los Exp. 5 o 6 sin el 3 (los mismos que su valor por defecto)
-DEFAULT_SA = (500.0, 0.001, 15000)
+# Parámetros de SA si se lanzan los Exp. 5 o 6 sin el 3: la mejor terna obtenida en el Exp. 3
+DEFAULT_SA = (5000.0, 0.0002, 40000)
 
 
 def build_params(
