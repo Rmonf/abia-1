@@ -24,6 +24,8 @@ class EnergyProblemParameters(object):
         plants: List[PowerPlant],
         customers: List[Customer],
         unserved_guaranteed_penalty_per_mw: float = 0.0,
+        enable_unassign: bool = True,
+        allow_unserved_guaranteed: bool = False,
     ):
         self.plants = plants
         self.customers = customers
@@ -31,6 +33,11 @@ class EnergyProblemParameters(object):
         self.n_customers = len(customers)
         # Usado en el Experimento 5 (penalización por no servir a un garantizado)
         self.unserved_guaranteed_penalty_per_mw = unserved_guaranteed_penalty_per_mw
+        # Operadores activos: son iguales para todos los estados de una ejecución, por eso
+        # viven aquí y no en el estado. El Exp. 1 compara con/sin desasignar; el Exp. 5
+        # permite dejar sin servicio a los garantizados.
+        self.enable_unassign = enable_unassign
+        self.allow_unserved_guaranteed = allow_unserved_guaranteed
 
         # Propiedades rápidas de centrales
         self.plant_capacity = [p.production_mw for p in plants]

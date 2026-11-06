@@ -26,17 +26,12 @@ class StateRepresentation(object):
         plant_used_mw: Optional[List[float]] = None,
         plant_customer_count: Optional[List[int]] = None,
         profit: Optional[float] = None,
-        enable_move: bool = True,
-        enable_unassign: bool = True,
-        allow_unserved_guaranteed: bool = False,
     ):
         self.params = params
         self.assignment = assignment
-        self.enable_move = enable_move
-        self.enable_unassign = enable_unassign
-        self.allow_unserved_guaranteed = allow_unserved_guaranteed
 
-        if plant_used_mw is None or plant_customer_count is None or profit is None:
+        if plant_used_mw is None:
+            # Estado nuevo: se calcula todo desde la asignación
             self.plant_used_mw = [0.0] * params.n_plants
             self.plant_customer_count = [0] * params.n_plants
             for i, p_idx in enumerate(assignment):
@@ -45,6 +40,7 @@ class StateRepresentation(object):
                     self.plant_customer_count[p_idx] += 1
             self.profit = self._compute_full_profit()
         else:
+            # Copia: los valores ya vienen calculados
             self.plant_used_mw = plant_used_mw
             self.plant_customer_count = plant_customer_count
             self.profit = profit
@@ -74,39 +70,34 @@ class StateRepresentation(object):
             plant_used_mw=self.plant_used_mw.copy(),
             plant_customer_count=self.plant_customer_count.copy(),
             profit=self.profit,
-            enable_move=self.enable_move,
-            enable_unassign=self.enable_unassign,
-            allow_unserved_guaranteed=self.allow_unserved_guaranteed,
         )
+
+    def _fits(self, i: int, j: int) -> bool:
+        """¿Cabe la demanda efectiva del cliente `i` en la capacidad libre de la central `j`?"""
+        p = self.params
+        return self.plant_used_mw[j] + p.effective_demand[i][j] <= p.plant_capacity[j] + 1e-9
+
+    def _can_unassign(self, i: int) -> bool:
+        """Se puede dejar sin servicio a `i` si está asignado y el problema lo permite."""
+        p = self.params
+        if not p.enable_unassign or self.assignment[i] == -1:
+            return False
+        return p.allow_unserved_guaranteed or not p.is_guaranteed[i]
 
     def generate_actions(self) -> Generator[EnergyOperator, None, None]:
         """
         Generador bajo demanda con `yield` para Hill Climbing (Sesión 2 y 4).
         Produce todas las acciones válidas desde el estado actual.
         """
-        p = self.params
-        assign = self.assignment
-        used = self.plant_used_mw
-        cap = p.plant_capacity
-        eff = p.effective_demand
-        is_guar = p.is_guaranteed
-        n_plants = p.n_plants
-        n_cust = p.n_customers
-
-        # 1. Operador de Asignar / Mover a otra central / Desasignar
-        if self.enable_move:
-            for i in range(n_cust):
-                curr_p = assign[i]
-                eff_i = eff[i]
-                # Mover o asignar a cualquier central con capacidad disponible suficiente
-                for j in range(n_plants):
-                    if j != curr_p and used[j] + eff_i[j] <= cap[j] + 1e-9:
-                        yield AssignOrMoveCustomer(i, curr_p, j)
-
-                # Desasignar cliente si está asignado y la restricción lo permite
-                if self.enable_unassign and curr_p != -1:
-                    if self.allow_unserved_guaranteed or not is_guar[i]:
-                        yield AssignOrMoveCustomer(i, curr_p, -1)
+        for i in range(self.params.n_customers):
+            curr_p = self.assignment[i]
+            # Mover o asignar a cualquier otra central con capacidad libre suficiente
+            for j in range(self.params.n_plants):
+                if j != curr_p and self._fits(i, j):
+                    yield AssignOrMoveCustomer(i, curr_p, j)
+            # Desasignar (dejar sin servicio)
+            if self._can_unassign(i):
+                yield AssignOrMoveCustomer(i, curr_p, -1)
 
     def generate_one_action(
         self, rng: Optional[Random] = None
@@ -131,9 +122,7 @@ class StateRepresentation(object):
         for _ in range(60):
             i = r.randrange(n_cust)
             curr_p = assign[i]
-            can_unassign = self.enable_unassign and (
-                curr_p != -1 and (self.allow_unserved_guaranteed or not is_guar[i])
-            )
+            can_unassign = self._can_unassign(i)
             # Elegir destino entre las centrales (0..n_plants-1) o -1 si se puede desasignar
             if can_unassign and r.random() < (1.0 / (n_plants + 1)):
                 yield AssignOrMoveCustomer(i, curr_p, -1)
@@ -241,8 +230,6 @@ class StateRepresentation(object):
 def generate_initial_state_random(
     params: EnergyProblemParameters,
     seed: int = 0,
-    enable_move: bool = True,
-    enable_unassign: bool = True,
 ) -> StateRepresentation:
     """
     Estrategia 1 (Aleatoria Válida):
@@ -281,16 +268,11 @@ def generate_initial_state_random(
     return StateRepresentation(
         params=params,
         assignment=assignment,
-        enable_move=enable_move,
-        enable_unassign=enable_unassign,
-        allow_unserved_guaranteed=False,
     )
 
 
 def generate_initial_state_greedy(
     params: EnergyProblemParameters,
-    enable_move: bool = True,
-    enable_unassign: bool = True,
 ) -> StateRepresentation:
     """
     Estrategia 2 (Voraz / Greedy Válida):
@@ -358,16 +340,11 @@ def generate_initial_state_greedy(
     return StateRepresentation(
         params=params,
         assignment=assignment,
-        enable_move=enable_move,
-        enable_unassign=enable_unassign,
-        allow_unserved_guaranteed=False,
     )
 
 
 def generate_initial_state_empty(
     params: EnergyProblemParameters,
-    enable_move: bool = True,
-    enable_unassign: bool = True,
 ) -> StateRepresentation:
     """
     Estrategia Vacía (Exclusiva para el Experimento 5):
@@ -377,7 +354,4 @@ def generate_initial_state_empty(
     return StateRepresentation(
         params=params,
         assignment=assignment,
-        enable_move=enable_move,
-        enable_unassign=enable_unassign,
-        allow_unserved_guaranteed=True,
     )

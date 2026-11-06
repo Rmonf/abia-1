@@ -90,28 +90,26 @@ def run_sa(
 def experiment_1(seeds: List[int]) -> None:
     print("\n=== EXPERIMENTO 1: Conjuntos de Operadores (Hill Climbing) ===")
     configs = [
-        ("Solo Mover/Asignar", True, False),
-        ("Mover + Desasignar", True, True),
+        ("Solo Mover/Asignar", False),
+        ("Mover + Desasignar", True),
     ]
-    profits_by_cfg = {name: [] for name, _, _ in configs}
-    times_by_cfg = {name: [] for name, _, _ in configs}
+    profits_by_cfg = {name: [] for name, _ in configs}
+    times_by_cfg = {name: [] for name, _ in configs}
 
     for s in seeds:
         plants = generate_power_plants(BASE_PLANTS, seed=s)
         customers = generate_customers(
             BASE_CUSTOMERS, BASE_CUST_PROPS, BASE_GUARANTEED_PROP, seed=s
         )
-        params = EnergyProblemParameters(plants, customers)
-        for name, mov, unass in configs:
+        for name, unass in configs:
+            params = EnergyProblemParameters(plants, customers, enable_unassign=unass)
             random.seed(s)
-            init_state = generate_initial_state_greedy(
-                params, enable_move=mov, enable_unassign=unass
-            )
+            init_state = generate_initial_state_greedy(params)
             final_state, elapsed = run_hc(init_state)
             profits_by_cfg[name].append(final_state.profit)
             times_by_cfg[name].append(elapsed)
 
-    for name, _, _ in configs:
+    for name, _ in configs:
         p_mean = statistics.mean(profits_by_cfg[name])
         p_std = statistics.stdev(profits_by_cfg[name])
         t_mean = statistics.mean(times_by_cfg[name])
@@ -123,8 +121,8 @@ def experiment_1(seeds: List[int]) -> None:
 
     plt.figure(figsize=(8, 5))
     plt.boxplot(
-        [profits_by_cfg[name] for name, _, _ in configs],
-        labels=[name for name, _, _ in configs],
+        [profits_by_cfg[name] for name, _ in configs],
+        labels=[name for name, _ in configs],
     )
     plt.ylabel("Beneficio diario (EUR)")
     plt.title("Experimento 1: Beneficio según conjunto de operadores (HC)")
@@ -315,7 +313,10 @@ def experiment_5(seeds: List[int], sa_params: Tuple[float, float, int]) -> None:
                 BASE_CUSTOMERS, BASE_CUST_PROPS, BASE_GUARANTEED_PROP, seed=s
             )
             params = EnergyProblemParameters(
-                plants, customers, unserved_guaranteed_penalty_per_mw=pen
+                plants,
+                customers,
+                unserved_guaranteed_penalty_per_mw=pen,
+                allow_unserved_guaranteed=True,
             )
 
             # Hill Climbing desde estado vacío
