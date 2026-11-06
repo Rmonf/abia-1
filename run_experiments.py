@@ -36,6 +36,7 @@ BASE_CUSTOMERS = 1000
 BASE_CUST_PROPS = (0.25, 0.30, 0.45)
 BASE_GUARANTEED_PROP = 0.75
 REPLICAS = 10
+RANDOM_REPS = 5  # ejecuciones de la solución aleatoria por semilla en el Exp. 2
 # Parámetros de SA si se lanzan los Exp. 5 o 6 sin el 3 (los mismos que su valor por defecto)
 DEFAULT_SA = (500.0, 0.001, 15000)
 
@@ -58,17 +59,23 @@ def get_feasible_seeds(
     n_needed: int = REPLICAS,
     plant_counts: Tuple[int, int, int] = BASE_PLANTS,
     n_customers: int = BASE_CUSTOMERS,
+    random_reps: int = 0,
 ) -> List[int]:
     """
     Busca `n_needed` semillas cuyas instancias generadas aleatoriamente sean factibles
     según el greedy (que consiga colocar a todos los garantizados). Que el greedy falle
     no demuestra que la instancia sea infactible.
+    Con `random_reps` > 0 se exige además que la solución aleatoria sea válida en esas
+    réplicas (semillas candidate*100 + rep), como se usan en el Exp. 2.
     """
     seeds = []
     candidate = 1
     while len(seeds) < n_needed:
+        params = build_params(candidate, plant_counts, n_customers)
         try:
-            generate_initial_state_greedy(build_params(candidate, plant_counts, n_customers))
+            generate_initial_state_greedy(params)
+            for rep in range(random_reps):
+                generate_initial_state_random(params, seed=candidate * 100 + rep)
             seeds.append(candidate)
         except ValueError:
             pass
@@ -143,8 +150,12 @@ def experiment_1(seeds: List[int]) -> None:
 # ==============================================================================
 # EXPERIMENTO 2: Estrategia de generación de la solución inicial
 # ==============================================================================
-def experiment_2(seeds: List[int]) -> None:
+def experiment_2() -> None:
     print("\n=== EXPERIMENTO 2: Estrategias de Solución Inicial (Hill Climbing) ===")
+    # La aleatoria falla en algunas semillas que el greedy acepta (p. ej. la 9), así que
+    # se comparan ambas estrategias solo en semillas donde funcionan las dos.
+    seeds = get_feasible_seeds(REPLICAS, random_reps=RANDOM_REPS)
+    print(f"  Semillas (válidas para greedy y aleatoria): {seeds}")
     strategies = ["Aleatoria Válida", "Voraz (Greedy)"]
     init_profits = {k: [] for k in strategies}
     final_profits = {k: [] for k in strategies}
@@ -155,7 +166,7 @@ def experiment_2(seeds: List[int]) -> None:
 
         # 1. Aleatoria (5 ejecuciones por semilla como recomienda la sección 7.5.1)
         rand_init_p, rand_final_p, rand_t = [], [], []
-        for rep in range(5):
+        for rep in range(RANDOM_REPS):
             random.seed(s * 100 + rep)
             st_rand = generate_initial_state_random(params, seed=s * 100 + rep)
             rand_init_p.append(st_rand.profit)
@@ -386,7 +397,7 @@ if __name__ == "__main__":
     selected = [int(sys.argv[1])] if len(sys.argv) > 1 else [1, 2, 3, 4, 5, 6]
 
     base_seeds = []
-    if any(n != 4 for n in selected):
+    if any(n not in (2, 4) for n in selected):
         print("Buscando 10 semillas factibles (según el greedy) para el escenario base...")
         base_seeds = get_feasible_seeds(REPLICAS, BASE_PLANTS, BASE_CUSTOMERS)
         print(f"Semillas seleccionadas: {base_seeds}")
@@ -395,7 +406,7 @@ if __name__ == "__main__":
     if 1 in selected:
         experiment_1(base_seeds)
     if 2 in selected:
-        experiment_2(base_seeds)
+        experiment_2()
     if 3 in selected:
         best_sa = experiment_3(base_seeds)
     if 4 in selected:
