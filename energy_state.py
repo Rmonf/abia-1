@@ -106,8 +106,11 @@ class StateRepresentation(object):
         Se elige un cliente y un destino al azar (-1 = desasignar) hasta dar con un
         movimiento válido. Los intentos están acotados porque puede no haber ninguno
         (p. ej. semilla 6: todas las centrales llenas y nada que desasignar); en ese caso
-        no se genera acción y el SA de AIMA se detiene. Con tantos intentos como acciones
-        posibles, que fallen todos habiendo alguna válida es prácticamente imposible.
+        no se genera acción y el SA de AIMA se detiene.
+        Si hay V acciones válidas entre las N = n_clientes * (n_centrales + 1) posibles,
+        la probabilidad de fallar los N intentos es (1 - V/N)^N ≈ e^(-V): despreciable con
+        muchas acciones válidas, pero con muy pocas no (V=1: ~37 %, V=3: ~5 %), y entonces
+        SA se detiene aunque aún quedaran movimientos.
         Usa el `random` global para que `random.seed(s)` haga reproducible la ejecución.
         """
         n_attempts = self.params.n_customers * (self.params.n_plants + 1)
