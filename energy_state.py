@@ -3,6 +3,7 @@ Representación del estado, constructores de solución inicial, generadores de a
 y función heurística. Sigue el patrón de las Sesiones 2, 4 y 5 de laboratorio.
 """
 
+import random
 from random import Random
 from typing import Generator, List, Optional
 from energy_problem_parameters import EnergyProblemParameters
@@ -99,44 +100,25 @@ class StateRepresentation(object):
             if self._can_unassign(i):
                 yield AssignOrMoveCustomer(i, curr_p, -1)
 
-    def generate_one_action(
-        self, rng: Optional[Random] = None
-    ) -> Generator[EnergyOperator, None, None]:
+    def generate_one_action(self) -> Generator[EnergyOperator, None, None]:
         """
         Generador de UN ÚNICO sucesor aleatorio para Simulated Annealing (Sesión 5).
-        Evita instanciar todos los estados vecinos en cada paso de SA.
+        Se elige un cliente y un destino al azar (-1 = desasignar) y se reintenta hasta que
+        el movimiento sea válido. En las instancias de la práctica siempre hay alguno (hay
+        centrales con capacidad libre), así que el bucle termina en pocos intentos.
+        Usa el `random` global para que `random.seed(s)` haga reproducible la ejecución.
         """
-        import random as py_random
-
-        r = rng if rng is not None else py_random
-        p = self.params
-        assign = self.assignment
-        used = self.plant_used_mw
-        cap = p.plant_capacity
-        eff = p.effective_demand
-        is_guar = p.is_guaranteed
-        n_plants = p.n_plants
-        n_cust = p.n_customers
-
-        # Intentamos muestrear directamente un movimiento válido al azar (O(1) promedio)
-        for _ in range(60):
-            i = r.randrange(n_cust)
-            curr_p = assign[i]
-            can_unassign = self._can_unassign(i)
-            # Elegir destino entre las centrales (0..n_plants-1) o -1 si se puede desasignar
-            if can_unassign and r.random() < (1.0 / (n_plants + 1)):
-                yield AssignOrMoveCustomer(i, curr_p, -1)
-                return
+        while True:
+            i = random.randrange(self.params.n_customers)
+            j = random.randrange(-1, self.params.n_plants)
+            curr_p = self.assignment[i]
+            if j == -1:
+                valid = self._can_unassign(i)
             else:
-                j = r.randrange(n_plants)
-                if j != curr_p and used[j] + eff[i][j] <= cap[j] + 1e-9:
-                    yield AssignOrMoveCustomer(i, curr_p, j)
-                    return
-
-        # Respaldo: si tras los intentos rápidos no salió uno válido, tomamos de la lista
-        valid_actions = list(self.generate_actions())
-        if valid_actions:
-            yield r.choice(valid_actions)
+                valid = j != curr_p and self._fits(i, j)
+            if valid:
+                yield AssignOrMoveCustomer(i, curr_p, j)
+                return
 
     def apply_action(self, action: AssignOrMoveCustomer) -> "StateRepresentation":
         """
