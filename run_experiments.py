@@ -122,7 +122,7 @@ def experiment_1(seeds: List[int]) -> None:
     plt.figure(figsize=(8, 5))
     plt.boxplot(
         [profits_by_cfg[name] for name, _ in configs],
-        labels=[name for name, _ in configs],
+        tick_labels=[name for name, _ in configs],
     )
     plt.ylabel("Beneficio diario (EUR)")
     plt.title("Experimento 1: Beneficio según conjunto de operadores (HC)")
@@ -180,7 +180,7 @@ def experiment_2(seeds: List[int]) -> None:
     plt.figure(figsize=(7, 5))
     plt.boxplot(
         [final_profits[k] for k in strategies],
-        labels=strategies,
+        tick_labels=strategies,
     )
     plt.ylabel("Beneficio final (EUR)")
     plt.title("Experimento 2: Influencia de la solución inicial (HC)")
