@@ -1,5 +1,9 @@
 [project]
 name = "abia1"
 version = "0.1.0"
-requires-python = ">=3.12"
-dependencies = []
+requires-python = ">=3.11"
+dependencies = [
+    "aima==2023.2.6",
+    "matplotlib>=3.11.2",
+    "numpy<2",
+]
