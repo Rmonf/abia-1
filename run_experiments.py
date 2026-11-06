@@ -208,37 +208,50 @@ def experiment_2() -> None:
 # ==============================================================================
 # EXPERIMENTO 3: Ajuste de parámetros de Simulated Annealing
 # ==============================================================================
+def evaluate_sa(seeds: List[int], k: float, lam: float, limit: int) -> Tuple[float, float, float]:
+    """SA desde el greedy en todas las semillas: (beneficio medio, desviación, tiempo medio)."""
+    profits, elapsed_list = [], []
+    for s in seeds:
+        init_state = generate_initial_state_greedy(build_params(s))
+        random.seed(s)
+        fin_state, elapsed = run_sa(init_state, k=k, lam=lam, limit=limit)
+        profits.append(fin_state.profit)
+        elapsed_list.append(elapsed)
+    return statistics.mean(profits), statistics.stdev(profits), statistics.mean(elapsed_list)
+
+
 def experiment_3(seeds: List[int]) -> Tuple[float, float, int]:
     print("\n=== EXPERIMENTO 3: Ajuste de Simulated Annealing ===")
-    k_values = [50, 500, 5000]
-    lam_values = [0.01, 0.001, 0.0002]
+    k_values = [50, 500, 5000, 10000, 50000]
+    lam_values = [0.01, 0.001, 0.0002, 0.0001]
+    limit_values = [5000, 15000, 40000]
+
+    # Fase 1: rejilla de (k, lam) con limit fijo
     limit = 15000
-
-    best_combo = DEFAULT_SA
     best_mean_profit = float("-inf")
-
     for k in k_values:
         for lam in lam_values:
-            profits = []
-            elapsed_list = []
-            for s in seeds:
-                params = build_params(s)
-                init_state = generate_initial_state_greedy(params)
-                random.seed(s)
-                fin_state, elapsed = run_sa(init_state, k=k, lam=lam, limit=limit)
-                profits.append(fin_state.profit)
-                elapsed_list.append(elapsed)
-
-            mean_p = statistics.mean(profits)
-            std_p = statistics.stdev(profits)
-            mean_t = statistics.mean(elapsed_list)
+            mean_p, std_p, mean_t = evaluate_sa(seeds, k, lam, limit)
             print(
-                f"  SA (k={k:5d}, lam={lam:<6g}, limit={limit}) -> "
-                f"Beneficio: {mean_p:10.2f} (±{std_p:7.2f}) EUR | Tiempo: {mean_t:5.3f} s"
+                f"  SA (k={k:5d}, lam={lam:<6g}, limit={limit:5d}) -> "
+                f"Beneficio: {mean_p:10.2f} (±{std_p:8.2f}) EUR | Tiempo: {mean_t:5.3f} s"
             )
             if mean_p > best_mean_profit:
                 best_mean_profit = mean_p
-                best_combo = (k, lam, limit)
+                best_k, best_lam = k, lam
+
+    # Fase 2: con la mejor pareja (k, lam), variar el número de iteraciones
+    print(f"  -- Mejor pareja: k={best_k}, lam={best_lam}. Variando limit:")
+    best_mean_profit = float("-inf")
+    for limit in limit_values:
+        mean_p, std_p, mean_t = evaluate_sa(seeds, best_k, best_lam, limit)
+        print(
+            f"  SA (k={best_k:5d}, lam={best_lam:<6g}, limit={limit:5d}) -> "
+            f"Beneficio: {mean_p:10.2f} (±{std_p:8.2f}) EUR | Tiempo: {mean_t:5.3f} s"
+        )
+        if mean_p > best_mean_profit:
+            best_mean_profit = mean_p
+            best_combo = (best_k, best_lam, limit)
 
     print(f"  => Mejor configuración SA seleccionada: k={best_combo[0]}, lam={best_combo[1]}, limit={best_combo[2]}")
     return best_combo
