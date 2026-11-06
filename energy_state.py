@@ -200,48 +200,48 @@ class StateRepresentation(object):
 # ==============================================================================
 
 
+def _guaranteed_by_demand(params: EnergyProblemParameters) -> List[int]:
+    """Garantizados de mayor a menor demanda: colocar primero los grandes evita que al
+    final no quepan en ninguna central."""
+    guaranteed = [i for i in range(params.n_customers) if params.is_guaranteed[i]]
+    guaranteed.sort(key=lambda i: params.customer_demand[i], reverse=True)
+    return guaranteed
+
+
+def _first_plant_that_fits(
+    params: EnergyProblemParameters, i: int, candidates: List[int], used_mw: List[float]
+) -> int:
+    """Primera central de `candidates` con capacidad libre para el cliente `i`, o -1."""
+    for j in candidates:
+        if used_mw[j] + params.effective_demand[i][j] <= params.plant_capacity[j] + 1e-9:
+            return j
+    return -1
+
+
 def generate_initial_state_random(
     params: EnergyProblemParameters,
     seed: int = 0,
 ) -> StateRepresentation:
     """
     Estrategia 1 (Aleatoria Válida):
-    Asigna primero todos los clientes GARANTIZADOS (ordenados de mayor a menor demanda
-    para asegurar factibilidad si la instancia es ajustada) a una central elegida al azar
-    que tenga capacidad disponible. Los clientes no garantizados quedan inicialmente sin
-    asignar (o se asignan aleatoriamente si se desea; dejarlos sin asignar permite una
-    solución inicial válida más rápida y de menor calidad para contrastar con Greedy).
+    Asigna cada cliente GARANTIZADO (de mayor a menor demanda) a una central al azar con
+    capacidad libre. Los no garantizados quedan sin servir: es una solución válida pero
+    de baja calidad, para contrastar con el Greedy.
     """
     rng = Random(seed)
     assignment = [-1] * params.n_customers
     used_mw = [0.0] * params.n_plants
 
-    guaranteed_indices = [
-        i for i in range(params.n_customers) if params.is_guaranteed[i]
-    ]
-    # Ordenar por demanda descendente evita bloqueos artificiales de empaquetado
-    guaranteed_indices.sort(key=lambda i: params.customer_demand[i], reverse=True)
-
     plant_indices = list(range(params.n_plants))
-    for i in guaranteed_indices:
+    for i in _guaranteed_by_demand(params):
         rng.shuffle(plant_indices)
-        placed = False
-        for j in plant_indices:
-            eff_d = params.effective_demand[i][j]
-            if used_mw[j] + eff_d <= params.plant_capacity[j] + 1e-9:
-                assignment[i] = j
-                used_mw[j] += eff_d
-                placed = True
-                break
-        if not placed:
-            raise ValueError(
-                "Instancia infactible: no se pudo asignar un cliente garantizado."
-            )
+        j = _first_plant_that_fits(params, i, plant_indices, used_mw)
+        if j == -1:
+            raise ValueError("Instancia infactible: no se pudo asignar un cliente garantizado.")
+        assignment[i] = j
+        used_mw[j] += params.effective_demand[i][j]
 
-    return StateRepresentation(
-        params=params,
-        assignment=assignment,
-    )
+    return StateRepresentation(params, assignment)
 
 
 def generate_initial_state_greedy(
@@ -249,71 +249,43 @@ def generate_initial_state_greedy(
 ) -> StateRepresentation:
     """
     Estrategia 2 (Voraz / Greedy Válida):
-    1. Asigna primero todos los clientes GARANTIZADOS (de mayor a menor demanda)
-       a la central con menor pérdida por distancia que ya esté encendida (o si ninguna
-       encendida tiene hueco, a la central más eficiente y cercana).
-    2. Después recorre los clientes NO GARANTIZADOS y los asigna solo si pueden entrar
-       en una central que YA esté en marcha (sin encender nuevas centrales caras) o si
-       su ingreso compensa encenderla.
+    1. Cada cliente GARANTIZADO (de mayor a menor demanda) va a la central más cercana
+       (menor pérdida) que ya esté encendida y tenga hueco; si no hay ninguna, a la más
+       cercana con hueco aunque haya que encenderla.
+    2. Cada cliente NO GARANTIZADO (de mayor a menor ganancia) va a la central encendida
+       más cercana con hueco; si no hay, se queda sin servir (no se encienden centrales
+       solo para ellos).
     """
     assignment = [-1] * params.n_customers
     used_mw = [0.0] * params.n_plants
     cust_count = [0] * params.n_plants
 
-    guaranteed_indices = [
-        i for i in range(params.n_customers) if params.is_guaranteed[i]
-    ]
-    guaranteed_indices.sort(key=lambda i: params.customer_demand[i], reverse=True)
+    def active_by_distance(i: int) -> List[int]:
+        return [j for j in params.plants_by_distance[i] if cust_count[j] > 0]
 
-    for i in guaranteed_indices:
-        placed = False
-        # Priorizar centrales ya encendidas con menor pérdida
-        for j in params.plants_by_distance[i]:
-            if cust_count[j] > 0:
-                eff_d = params.effective_demand[i][j]
-                if used_mw[j] + eff_d <= params.plant_capacity[j] + 1e-9:
-                    assignment[i] = j
-                    used_mw[j] += eff_d
-                    cust_count[j] += 1
-                    placed = True
-                    break
-        # Si no cabe en ninguna encendida, abrir la central disponible con menor pérdida
-        if not placed:
-            for j in params.plants_by_distance[i]:
-                eff_d = params.effective_demand[i][j]
-                if used_mw[j] + eff_d <= params.plant_capacity[j] + 1e-9:
-                    assignment[i] = j
-                    used_mw[j] += eff_d
-                    cust_count[j] += 1
-                    placed = True
-                    break
-        if not placed:
-            raise ValueError(
-                "Instancia infactible: no se pudo asignar un cliente garantizado en Greedy."
-            )
+    def place(i: int, j: int) -> None:
+        assignment[i] = j
+        used_mw[j] += params.effective_demand[i][j]
+        cust_count[j] += 1
 
-    # Paso 2: Asignar clientes NO garantizados a centrales que YA están en marcha
-    non_guaranteed_indices = [
-        i for i in range(params.n_customers) if not params.is_guaranteed[i]
-    ]
-    non_guaranteed_indices.sort(
-        key=lambda i: params.customer_service_gain[i], reverse=True
-    )
+    # Paso 1: garantizados
+    for i in _guaranteed_by_demand(params):
+        j = _first_plant_that_fits(params, i, active_by_distance(i), used_mw)
+        if j == -1:
+            j = _first_plant_that_fits(params, i, params.plants_by_distance[i], used_mw)
+        if j == -1:
+            raise ValueError("Instancia infactible: no se pudo asignar un cliente garantizado en Greedy.")
+        place(i, j)
 
-    for i in non_guaranteed_indices:
-        for j in params.plants_by_distance[i]:
-            if cust_count[j] > 0:
-                eff_d = params.effective_demand[i][j]
-                if used_mw[j] + eff_d <= params.plant_capacity[j] + 1e-9:
-                    assignment[i] = j
-                    used_mw[j] += eff_d
-                    cust_count[j] += 1
-                    break
+    # Paso 2: no garantizados, solo en centrales ya en marcha
+    non_guaranteed = [i for i in range(params.n_customers) if not params.is_guaranteed[i]]
+    non_guaranteed.sort(key=lambda i: params.customer_service_gain[i], reverse=True)
+    for i in non_guaranteed:
+        j = _first_plant_that_fits(params, i, active_by_distance(i), used_mw)
+        if j != -1:
+            place(i, j)
 
-    return StateRepresentation(
-        params=params,
-        assignment=assignment,
-    )
+    return StateRepresentation(params, assignment)
 
 
 def generate_initial_state_empty(
@@ -323,8 +295,4 @@ def generate_initial_state_empty(
     Estrategia Vacía (Exclusiva para el Experimento 5):
     Ningún cliente está asignado inicialmente y todas las centrales están paradas.
     """
-    assignment = [-1] * params.n_customers
-    return StateRepresentation(
-        params=params,
-        assignment=assignment,
-    )
+    return StateRepresentation(params, [-1] * params.n_customers)
