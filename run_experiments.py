@@ -3,14 +3,19 @@ Script principal para ejecutar los 6 experimentos obligatorios de la práctica.
 Ejecutar con: python run_experiments.py
 """
 
+import os
 import random
 import statistics
+import sys
 from timeit import default_timer as timer
 from typing import List, Tuple
 
 import matplotlib
 matplotlib.use("agg")
 import matplotlib.pyplot as plt
+
+# Los módulos del profesorado están en base/ y se importan por nombre (from customer import ...)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "base"))
 
 from aima.search import hill_climbing, simulated_annealing, exp_schedule
 from power_plants import generate_power_plants
