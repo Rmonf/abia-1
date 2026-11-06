@@ -1,0 +1,408 @@
+"""
+Script principal para ejecutar los 6 experimentos obligatorios de la práctica.
+Ejecutar con: python run_experiments.py
+"""
+
+import random
+import statistics
+from timeit import default_timer as timer
+from typing import List, Tuple
+
+import matplotlib
+matplotlib.use("agg")
+import matplotlib.pyplot as plt
+
+from aima.search import hill_climbing, simulated_annealing, exp_schedule
+from power_plants import generate_power_plants
+from customers import generate_customers
+from energy_problem_parameters import EnergyProblemParameters
+from energy_state import (
+    StateRepresentation,
+    generate_initial_state_random,
+    generate_initial_state_greedy,
+    generate_initial_state_empty,
+)
+from energy_problem import EnergyProblem
+
+# Escenario base del enunciado (Apartado 4.6.1)
+BASE_PLANTS = (5, 10, 25)
+BASE_CUSTOMERS = 1000
+BASE_CUST_PROPS = (0.25, 0.30, 0.45)
+BASE_GUARANTEED_PROP = 0.75
+REPLICAS = 10
+
+
+def get_feasible_seeds(
+    n_needed: int = REPLICAS,
+    plant_counts: Tuple[int, int, int] = BASE_PLANTS,
+    n_customers: int = BASE_CUSTOMERS,
+) -> List[int]:
+    """
+    Busca `n_needed` semillas cuyas instancias generadas aleatoriamente sean factibles
+    (es decir, donde quepan todos los clientes garantizados).
+    """
+    seeds = []
+    candidate = 1
+    while len(seeds) < n_needed:
+        plants = generate_power_plants(plant_counts, seed=candidate)
+        customers = generate_customers(
+            n_customers, BASE_CUST_PROPS, BASE_GUARANTEED_PROP, seed=candidate
+        )
+        params = EnergyProblemParameters(plants, customers)
+        try:
+            generate_initial_state_greedy(params)
+            seeds.append(candidate)
+        except ValueError:
+            pass
+        candidate += 1
+    return seeds
+
+
+def run_hc(initial_state: StateRepresentation) -> Tuple[StateRepresentation, float]:
+    """Ejecuta Hill Climbing midiendo el tiempo de cómputo."""
+    problem = EnergyProblem(initial_state, use_one_action=False)
+    t0 = timer()
+    final_state = hill_climbing(problem)
+    t1 = timer()
+    return final_state, (t1 - t0)
+
+
+def run_sa(
+    initial_state: StateRepresentation, k: float, lam: float, limit: int
+) -> Tuple[StateRepresentation, float]:
+    """Ejecuta Simulated Annealing con generador unitario midiendo el tiempo."""
+    problem = EnergyProblem(initial_state, use_one_action=True)
+    sched = exp_schedule(k=k, lam=lam, limit=limit)
+    t0 = timer()
+    final_state = simulated_annealing(problem, schedule=sched)
+    t1 = timer()
+    return final_state, (t1 - t0)
+
+
+# ==============================================================================
+# EXPERIMENTO 1: Elección del conjunto de operadores
+# ==============================================================================
+def experiment_1(seeds: List[int]) -> None:
+    print("\n=== EXPERIMENTO 1: Conjuntos de Operadores (Hill Climbing) ===")
+    configs = [
+        ("Solo Mover/Asignar", True, False, False),
+        ("Mover + Desasignar", True, True, False),
+        ("Mover + Desasignar + Swap", True, True, True),
+    ]
+    profits_by_cfg = {name: [] for name, _, _, _ in configs}
+    times_by_cfg = {name: [] for name, _, _, _ in configs}
+
+    for s in seeds:
+        plants = generate_power_plants(BASE_PLANTS, seed=s)
+        customers = generate_customers(
+            BASE_CUSTOMERS, BASE_CUST_PROPS, BASE_GUARANTEED_PROP, seed=s
+        )
+        params = EnergyProblemParameters(plants, customers)
+        for name, mov, unass, swp in configs:
+            random.seed(s)
+            init_state = generate_initial_state_greedy(
+                params, enable_move=mov, enable_unassign=unass, enable_swap=swp
+            )
+            final_state, elapsed = run_hc(init_state)
+            profits_by_cfg[name].append(final_state.profit)
+            times_by_cfg[name].append(elapsed)
+
+    for name, _, _, _ in configs:
+        p_mean = statistics.mean(profits_by_cfg[name])
+        p_std = statistics.stdev(profits_by_cfg[name])
+        t_mean = statistics.mean(times_by_cfg[name])
+        t_std = statistics.stdev(times_by_cfg[name])
+        print(
+            f"  {name:28s} -> Beneficio: {p_mean:10.2f} (±{p_std:7.2f}) EUR | "
+            f"Tiempo: {t_mean:6.3f} (±{t_std:5.3f}) s"
+        )
+
+    plt.figure(figsize=(8, 5))
+    plt.boxplot(
+        [profits_by_cfg[name] for name, _, _, _ in configs],
+        labels=[name for name, _, _, _ in configs],
+    )
+    plt.ylabel("Beneficio diario (EUR)")
+    plt.title("Experimento 1: Beneficio según conjunto de operadores (HC)")
+    plt.tight_layout()
+    plt.savefig("exp1_operadores.png")
+    plt.close()
+
+
+# ==============================================================================
+# EXPERIMENTO 2: Estrategia de generación de la solución inicial
+# ==============================================================================
+def experiment_2(seeds: List[int]) -> None:
+    print("\n=== EXPERIMENTO 2: Estrategias de Solución Inicial (Hill Climbing) ===")
+    strategies = ["Aleatoria Válida", "Voraz (Greedy)"]
+    init_profits = {k: [] for k in strategies}
+    final_profits = {k: [] for k in strategies}
+    times = {k: [] for k in strategies}
+
+    for s in seeds:
+        plants = generate_power_plants(BASE_PLANTS, seed=s)
+        customers = generate_customers(
+            BASE_CUSTOMERS, BASE_CUST_PROPS, BASE_GUARANTEED_PROP, seed=s
+        )
+        params = EnergyProblemParameters(plants, customers)
+
+        # 1. Aleatoria (5 ejecuciones por semilla como recomienda la sección 7.5.1)
+        rand_init_p, rand_final_p, rand_t = [], [], []
+        for rep in range(5):
+            random.seed(s * 100 + rep)
+            st_rand = generate_initial_state_random(params, seed=s * 100 + rep)
+            rand_init_p.append(st_rand.profit)
+            fin_rand, t_rand = run_hc(st_rand)
+            rand_final_p.append(fin_rand.profit)
+            rand_t.append(t_rand)
+
+        init_profits["Aleatoria Válida"].append(statistics.mean(rand_init_p))
+        final_profits["Aleatoria Válida"].append(statistics.mean(rand_final_p))
+        times["Aleatoria Válida"].append(statistics.mean(rand_t))
+
+        # 2. Greedy
+        random.seed(s)
+        st_greedy = generate_initial_state_greedy(params)
+        init_profits["Voraz (Greedy)"].append(st_greedy.profit)
+        fin_greedy, t_greedy = run_hc(st_greedy)
+        final_profits["Voraz (Greedy)"].append(fin_greedy.profit)
+        times["Voraz (Greedy)"].append(t_greedy)
+
+    for k in strategies:
+        print(
+            f"  {k:18s} -> Inicial: {statistics.mean(init_profits[k]):10.2f} EUR | "
+            f"Final: {statistics.mean(final_profits[k]):10.2f} (±{statistics.stdev(final_profits[k]):7.2f}) EUR | "
+            f"Tiempo: {statistics.mean(times[k]):6.3f} (±{statistics.stdev(times[k]):5.3f}) s"
+        )
+
+    plt.figure(figsize=(7, 5))
+    plt.boxplot(
+        [final_profits[k] for k in strategies],
+        labels=strategies,
+    )
+    plt.ylabel("Beneficio final (EUR)")
+    plt.title("Experimento 2: Influencia de la solución inicial (HC)")
+    plt.tight_layout()
+    plt.savefig("exp2_inicializacion.png")
+    plt.close()
+
+
+# ==============================================================================
+# EXPERIMENTO 3: Ajuste de parámetros de Simulated Annealing
+# ==============================================================================
+def experiment_3(seeds: List[int]) -> Tuple[float, float, int]:
+    print("\n=== EXPERIMENTO 3: Ajuste de Simulated Annealing ===")
+    k_values = [50, 500, 5000]
+    lam_values = [0.01, 0.001, 0.0002]
+    limit = 15000
+
+    best_combo = (500.0, 0.001, limit)
+    best_mean_profit = float("-inf")
+
+    for k in k_values:
+        for lam in lam_values:
+            profits = []
+            elapsed_list = []
+            for s in seeds:
+                plants = generate_power_plants(BASE_PLANTS, seed=s)
+                customers = generate_customers(
+                    BASE_CUSTOMERS, BASE_CUST_PROPS, BASE_GUARANTEED_PROP, seed=s
+                )
+                params = EnergyProblemParameters(plants, customers)
+                init_state = generate_initial_state_greedy(params)
+                random.seed(s)
+                fin_state, elapsed = run_sa(init_state, k=k, lam=lam, limit=limit)
+                profits.append(fin_state.profit)
+                elapsed_list.append(elapsed)
+
+            mean_p = statistics.mean(profits)
+            std_p = statistics.stdev(profits)
+            mean_t = statistics.mean(elapsed_list)
+            print(
+                f"  SA (k={k:5d}, lam={lam:<6g}, limit={limit}) -> "
+                f"Beneficio: {mean_p:10.2f} (±{std_p:7.2f}) EUR | Tiempo: {mean_t:5.3f} s"
+            )
+            if mean_p > best_mean_profit:
+                best_mean_profit = mean_p
+                best_combo = (k, lam, limit)
+
+    print(f"  => Mejor configuración SA seleccionada: k={best_combo[0]}, lam={best_combo[1]}, limit={best_combo[2]}")
+    return best_combo
+
+
+# ==============================================================================
+# EXPERIMENTO 4: Escalabilidad (Variando Clientes y Variando Centrales)
+# ==============================================================================
+def experiment_4() -> None:
+    print("\n=== EXPERIMENTO 4: Escalabilidad del Tiempo de Ejecución (HC) ===")
+    # 4A: 40 centrales fijas, clientes de 250 en 250
+    customer_sizes = [250, 500, 750, 1000, 1250]
+    mean_times_cust = []
+    for n_cust in customer_sizes:
+        seeds = get_feasible_seeds(REPLICAS, BASE_PLANTS, n_cust)
+        t_list = []
+        for s in seeds:
+            plants = generate_power_plants(BASE_PLANTS, seed=s)
+            customers = generate_customers(
+                n_cust, BASE_CUST_PROPS, BASE_GUARANTEED_PROP, seed=s
+            )
+            params = EnergyProblemParameters(plants, customers)
+            init_state = generate_initial_state_greedy(params)
+            random.seed(s)
+            _, elapsed = run_hc(init_state)
+            t_list.append(elapsed)
+        m_t = statistics.mean(t_list)
+        s_t = statistics.stdev(t_list)
+        mean_times_cust.append(m_t)
+        print(f"  [40 centrales] Clientes={n_cust:4d} -> Tiempo medio: {m_t:6.3f} (±{s_t:5.3f}) s")
+
+    # 4B: 1000 clientes fijos, centrales de 40 en 40 manteniendo proporción (5, 10, 25)
+    plant_multipliers = [1, 2, 3, 4]
+    mean_times_plants = []
+    for mult in plant_multipliers:
+        p_counts = (5 * mult, 10 * mult, 25 * mult)
+        seeds = get_feasible_seeds(REPLICAS, p_counts, BASE_CUSTOMERS)
+        t_list = []
+        for s in seeds:
+            plants = generate_power_plants(p_counts, seed=s)
+            customers = generate_customers(
+                BASE_CUSTOMERS, BASE_CUST_PROPS, BASE_GUARANTEED_PROP, seed=s
+            )
+            params = EnergyProblemParameters(plants, customers)
+            init_state = generate_initial_state_greedy(params)
+            random.seed(s)
+            _, elapsed = run_hc(init_state)
+            t_list.append(elapsed)
+        m_t = statistics.mean(t_list)
+        s_t = statistics.stdev(t_list)
+        mean_times_plants.append(m_t)
+        print(f"  [1000 clientes] Centrales={40*mult:3d} -> Tiempo medio: {m_t:6.3f} (±{s_t:5.3f}) s")
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.5))
+    ax1.plot(customer_sizes, mean_times_cust, marker="o")
+    ax1.set_xlabel("Número de clientes (40 centrales)")
+    ax1.set_ylabel("Tiempo medio (s)")
+    ax1.set_title("Escalabilidad por nº de clientes")
+
+    ax2.plot([40 * m for m in plant_multipliers], mean_times_plants, marker="s", color="orange")
+    ax2.set_xlabel("Número de centrales (1000 clientes)")
+    ax2.set_ylabel("Tiempo medio (s)")
+    ax2.set_title("Escalabilidad por nº de centrales")
+
+    plt.tight_layout()
+    plt.savefig("exp4_escalabilidad.png")
+    plt.close()
+
+
+# ==============================================================================
+# EXPERIMENTO 5: Penalización en la heurística partiendo de solución vacía
+# ==============================================================================
+def experiment_5(seeds: List[int], sa_params: Tuple[float, float, int]) -> None:
+    print("\n=== EXPERIMENTO 5: Solución Inicial Vacía y Penalización Garantizados ===")
+    penalties = [100.0, 500.0, 1000.0, 5000.0, 20000.0]
+    k, lam, limit = sa_params
+
+    for pen in penalties:
+        hc_unserved, sa_unserved = [], []
+        hc_valid_runs, sa_valid_runs = 0, 0
+        for s in seeds:
+            plants = generate_power_plants(BASE_PLANTS, seed=s)
+            customers = generate_customers(
+                BASE_CUSTOMERS, BASE_CUST_PROPS, BASE_GUARANTEED_PROP, seed=s
+            )
+            params = EnergyProblemParameters(
+                plants, customers, unserved_guaranteed_penalty_per_mw=pen
+            )
+
+            # Hill Climbing desde estado vacío
+            random.seed(s)
+            empty_hc = generate_initial_state_empty(params)
+            fin_hc, _ = run_hc(empty_hc)
+            u_hc = fin_hc.count_unserved_guaranteed()
+            hc_unserved.append(u_hc)
+            if u_hc == 0:
+                hc_valid_runs += 1
+
+            # Simulated Annealing desde estado vacío
+            random.seed(s)
+            empty_sa = generate_initial_state_empty(params)
+            fin_sa, _ = run_sa(empty_sa, k=k, lam=lam, limit=limit)
+            u_sa = fin_sa.count_unserved_guaranteed()
+            sa_unserved.append(u_sa)
+            if u_sa == 0:
+                sa_valid_runs += 1
+
+        print(
+            f"  Penalización={pen:7.1f} EUR/MW -> "
+            f"HC: {hc_valid_runs}/{len(seeds)} válidas (media no servidos={statistics.mean(hc_unserved):.1f}) | "
+            f"SA: {sa_valid_runs}/{len(seeds)} válidas (media no servidos={statistics.mean(sa_unserved):.1f})"
+        )
+
+
+# ==============================================================================
+# EXPERIMENTO 6: Duplicar y triplicar las centrales de Tipo C
+# ==============================================================================
+def experiment_6(seeds: List[int], sa_params: Tuple[float, float, int]) -> None:
+    print("\n=== EXPERIMENTO 6: Proporción de Centrales Tipo C (x1, x2, x3) ===")
+    c_configs = [
+        ("Base (5, 10, 25)", (5, 10, 25)),
+        ("Doble C (5, 10, 50)", (5, 10, 50)),
+        ("Triple C (5, 10, 75)", (5, 10, 75)),
+    ]
+    k, lam, limit = sa_params
+
+    for label, counts in c_configs:
+        hc_profits, hc_times, hc_active_ab, hc_active_c = [], [], [], []
+        sa_profits, sa_times, sa_active_ab, sa_active_c = [], [], [], []
+
+        for s in seeds:
+            plants = generate_power_plants(counts, seed=s)
+            customers = generate_customers(
+                BASE_CUSTOMERS, BASE_CUST_PROPS, BASE_GUARANTEED_PROP, seed=s
+            )
+            params = EnergyProblemParameters(plants, customers)
+
+            # Hill Climbing
+            random.seed(s)
+            init_hc = generate_initial_state_greedy(params)
+            fin_hc, t_hc = run_hc(init_hc)
+            act_hc = fin_hc.active_plants_by_type()
+            hc_profits.append(fin_hc.profit)
+            hc_times.append(t_hc)
+            hc_active_ab.append(act_hc[0] + act_hc[1])
+            hc_active_c.append(act_hc[2])
+
+            # Simulated Annealing
+            random.seed(s)
+            init_sa = generate_initial_state_greedy(params)
+            fin_sa, t_sa = run_sa(init_sa, k=k, lam=lam, limit=limit)
+            act_sa = fin_sa.active_plants_by_type()
+            sa_profits.append(fin_sa.profit)
+            sa_times.append(t_sa)
+            sa_active_ab.append(act_sa[0] + act_sa[1])
+            sa_active_c.append(act_sa[2])
+
+        print(
+            f"  {label:20s} [HC] -> Beneficio: {statistics.mean(hc_profits):10.2f} EUR | "
+            f"Activas A+B: {statistics.mean(hc_active_ab):4.1f} | Activas C: {statistics.mean(hc_active_c):4.1f} | "
+            f"Tiempo: {statistics.mean(hc_times):5.3f} s"
+        )
+        print(
+            f"  {label:20s} [SA] -> Beneficio: {statistics.mean(sa_profits):10.2f} EUR | "
+            f"Activas A+B: {statistics.mean(sa_active_ab):4.1f} | Activas C: {statistics.mean(sa_active_c):4.1f} | "
+            f"Tiempo: {statistics.mean(sa_times):5.3f} s"
+        )
+
+
+if __name__ == "__main__":
+    print("Buscando 10 semillas factibles para el escenario base...")
+    base_seeds = get_feasible_seeds(REPLICAS, BASE_PLANTS, BASE_CUSTOMERS)
+    print(f"Semillas seleccionadas: {base_seeds}")
+
+    experiment_1(base_seeds)
+    experiment_2(base_seeds)
+    best_sa = experiment_3(base_seeds)
+    experiment_4()
+    experiment_5(base_seeds, best_sa)
+    experiment_6(base_seeds, best_sa)
+    print("\nTodos los experimentos han finalizado. Gráficas guardadas en PNG.")
