@@ -23,14 +23,6 @@ class AssignOrMoveCustomer(EnergyOperator):
         return f"AssignOrMoveCustomer(customer={self.c_i}, from={self.old_p}, to={self.new_p})"
 
 
-class SwapCustomers(EnergyOperator):
-    """
-    Intercambia las centrales asignadas a los clientes `c_i` y `c_j`.
-    """
-
-    def __init__(self, c_i: int, c_j: int):
-        self.c_i = c_i
-        self.c_j = c_j
-
-    def __repr__(self) -> str:
-        return f"SwapCustomers(c_i={self.c_i}, c_j={self.c_j})"
+# No hay operador de intercambio (swap) entre dos clientes asignados: con esta heurística
+# nunca cambia el beneficio (ambos siguen servidos y ambas centrales siguen en marcha), así
+# que Hill Climbing jamás lo acepta y solo multiplicaría el factor de ramificación.

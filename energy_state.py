@@ -6,7 +6,7 @@ y función heurística. Sigue el patrón de las Sesiones 2, 4 y 5 de laboratorio
 from random import Random
 from typing import Generator, List, Optional
 from energy_problem_parameters import EnergyProblemParameters
-from energy_operators import EnergyOperator, AssignOrMoveCustomer, SwapCustomers
+from energy_operators import EnergyOperator, AssignOrMoveCustomer
 
 
 class StateRepresentation(object):
@@ -28,14 +28,12 @@ class StateRepresentation(object):
         profit: Optional[float] = None,
         enable_move: bool = True,
         enable_unassign: bool = True,
-        enable_swap: bool = False,
         allow_unserved_guaranteed: bool = False,
     ):
         self.params = params
         self.assignment = assignment
         self.enable_move = enable_move
         self.enable_unassign = enable_unassign
-        self.enable_swap = enable_swap
         self.allow_unserved_guaranteed = allow_unserved_guaranteed
 
         if plant_used_mw is None or plant_customer_count is None or profit is None:
@@ -78,7 +76,6 @@ class StateRepresentation(object):
             profit=self.profit,
             enable_move=self.enable_move,
             enable_unassign=self.enable_unassign,
-            enable_swap=self.enable_swap,
             allow_unserved_guaranteed=self.allow_unserved_guaranteed,
         )
 
@@ -110,24 +107,6 @@ class StateRepresentation(object):
                 if self.enable_unassign and curr_p != -1:
                     if self.allow_unserved_guaranteed or not is_guar[i]:
                         yield AssignOrMoveCustomer(i, curr_p, -1)
-
-        # 2. Operador de Intercambio (Swap) entre clientes asignados a distintas centrales
-        if self.enable_swap:
-            # Para mantener el factor de ramificación manejable cuando se activa swap,
-            # probamos intercambios entre clientes asignados a centrales distintas
-            assigned_indices = [i for i in range(n_cust) if assign[i] != -1]
-            limit = min(len(assigned_indices), 120)
-            for idx_a in range(limit):
-                i = assigned_indices[idx_a]
-                pi = assign[i]
-                for idx_b in range(idx_a + 1, limit):
-                    k = assigned_indices[idx_b]
-                    pk = assign[k]
-                    if pi != pk:
-                        new_used_pi = used[pi] - eff[i][pi] + eff[k][pi]
-                        new_used_pk = used[pk] - eff[k][pk] + eff[i][pk]
-                        if new_used_pi <= cap[pi] + 1e-9 and new_used_pk <= cap[pk] + 1e-9:
-                            yield SwapCustomers(i, k)
 
     def generate_one_action(
         self, rng: Optional[Random] = None
@@ -170,54 +149,41 @@ class StateRepresentation(object):
         if valid_actions:
             yield r.choice(valid_actions)
 
-    def apply_action(self, action: EnergyOperator) -> "StateRepresentation":
+    def apply_action(self, action: AssignOrMoveCustomer) -> "StateRepresentation":
         """
         Crea un nuevo estado aplicando `action` y actualiza el beneficio en O(1).
         """
         new_state = self.copy()
         p = self.params
 
-        if isinstance(action, AssignOrMoveCustomer):
-            i = action.c_i
-            old_p = action.old_p
-            new_p = action.new_p
+        i = action.c_i
+        old_p = action.old_p
+        new_p = action.new_p
 
-            # 1. Quitar de old_p si estaba asignado
-            if old_p != -1:
-                new_state.plant_used_mw[old_p] -= p.effective_demand[i][old_p]
-                new_state.plant_customer_count[old_p] -= 1
-                if new_state.plant_customer_count[old_p] == 0:
-                    new_state.plant_used_mw[old_p] = 0.0
-                    # La central pasa de estar en marcha a estar parada: ahorramos coste
-                    new_state.profit += p.plant_activation_delta_cost[old_p]
+        # 1. Quitar de old_p si estaba asignado
+        if old_p != -1:
+            new_state.plant_used_mw[old_p] -= p.effective_demand[i][old_p]
+            new_state.plant_customer_count[old_p] -= 1
+            if new_state.plant_customer_count[old_p] == 0:
+                new_state.plant_used_mw[old_p] = 0.0
+                # La central pasa de estar en marcha a estar parada: ahorramos coste
+                new_state.profit += p.plant_activation_delta_cost[old_p]
 
-            # 2. Poner en new_p si no es -1
-            if new_p != -1:
-                if new_state.plant_customer_count[new_p] == 0:
-                    # La central estaba parada y se pone en marcha
-                    new_state.profit -= p.plant_activation_delta_cost[new_p]
-                new_state.plant_used_mw[new_p] += p.effective_demand[i][new_p]
-                new_state.plant_customer_count[new_p] += 1
+        # 2. Poner en new_p si no es -1
+        if new_p != -1:
+            if new_state.plant_customer_count[new_p] == 0:
+                # La central estaba parada y se pone en marcha
+                new_state.profit -= p.plant_activation_delta_cost[new_p]
+            new_state.plant_used_mw[new_p] += p.effective_demand[i][new_p]
+            new_state.plant_customer_count[new_p] += 1
 
-            # 3. Cambio en ingresos/penalizaciones del cliente
-            if old_p == -1 and new_p != -1:
-                new_state.profit += p.customer_service_gain[i]
-            elif old_p != -1 and new_p == -1:
-                new_state.profit -= p.customer_service_gain[i]
+        # 3. Cambio en ingresos/penalizaciones del cliente
+        if old_p == -1 and new_p != -1:
+            new_state.profit += p.customer_service_gain[i]
+        elif old_p != -1 and new_p == -1:
+            new_state.profit -= p.customer_service_gain[i]
 
-            new_state.assignment[i] = new_p
-
-        elif isinstance(action, SwapCustomers):
-            i, k = action.c_i, action.c_j
-            pi, pk = new_state.assignment[i], new_state.assignment[k]
-            new_state.plant_used_mw[pi] += (
-                p.effective_demand[k][pi] - p.effective_demand[i][pi]
-            )
-            new_state.plant_used_mw[pk] += (
-                p.effective_demand[i][pk] - p.effective_demand[k][pk]
-            )
-            new_state.assignment[i] = pk
-            new_state.assignment[k] = pi
+        new_state.assignment[i] = new_p
 
         return new_state
 
@@ -277,7 +243,6 @@ def generate_initial_state_random(
     seed: int = 0,
     enable_move: bool = True,
     enable_unassign: bool = True,
-    enable_swap: bool = False,
 ) -> StateRepresentation:
     """
     Estrategia 1 (Aleatoria Válida):
@@ -318,7 +283,6 @@ def generate_initial_state_random(
         assignment=assignment,
         enable_move=enable_move,
         enable_unassign=enable_unassign,
-        enable_swap=enable_swap,
         allow_unserved_guaranteed=False,
     )
 
@@ -327,7 +291,6 @@ def generate_initial_state_greedy(
     params: EnergyProblemParameters,
     enable_move: bool = True,
     enable_unassign: bool = True,
-    enable_swap: bool = False,
 ) -> StateRepresentation:
     """
     Estrategia 2 (Voraz / Greedy Válida):
@@ -397,7 +360,6 @@ def generate_initial_state_greedy(
         assignment=assignment,
         enable_move=enable_move,
         enable_unassign=enable_unassign,
-        enable_swap=enable_swap,
         allow_unserved_guaranteed=False,
     )
 
@@ -406,7 +368,6 @@ def generate_initial_state_empty(
     params: EnergyProblemParameters,
     enable_move: bool = True,
     enable_unassign: bool = True,
-    enable_swap: bool = False,
 ) -> StateRepresentation:
     """
     Estrategia Vacía (Exclusiva para el Experimento 5):
@@ -418,6 +379,5 @@ def generate_initial_state_empty(
         assignment=assignment,
         enable_move=enable_move,
         enable_unassign=enable_unassign,
-        enable_swap=enable_swap,
         allow_unserved_guaranteed=True,
     )

@@ -90,12 +90,11 @@ def run_sa(
 def experiment_1(seeds: List[int]) -> None:
     print("\n=== EXPERIMENTO 1: Conjuntos de Operadores (Hill Climbing) ===")
     configs = [
-        ("Solo Mover/Asignar", True, False, False),
-        ("Mover + Desasignar", True, True, False),
-        ("Mover + Desasignar + Swap", True, True, True),
+        ("Solo Mover/Asignar", True, False),
+        ("Mover + Desasignar", True, True),
     ]
-    profits_by_cfg = {name: [] for name, _, _, _ in configs}
-    times_by_cfg = {name: [] for name, _, _, _ in configs}
+    profits_by_cfg = {name: [] for name, _, _ in configs}
+    times_by_cfg = {name: [] for name, _, _ in configs}
 
     for s in seeds:
         plants = generate_power_plants(BASE_PLANTS, seed=s)
@@ -103,16 +102,16 @@ def experiment_1(seeds: List[int]) -> None:
             BASE_CUSTOMERS, BASE_CUST_PROPS, BASE_GUARANTEED_PROP, seed=s
         )
         params = EnergyProblemParameters(plants, customers)
-        for name, mov, unass, swp in configs:
+        for name, mov, unass in configs:
             random.seed(s)
             init_state = generate_initial_state_greedy(
-                params, enable_move=mov, enable_unassign=unass, enable_swap=swp
+                params, enable_move=mov, enable_unassign=unass
             )
             final_state, elapsed = run_hc(init_state)
             profits_by_cfg[name].append(final_state.profit)
             times_by_cfg[name].append(elapsed)
 
-    for name, _, _, _ in configs:
+    for name, _, _ in configs:
         p_mean = statistics.mean(profits_by_cfg[name])
         p_std = statistics.stdev(profits_by_cfg[name])
         t_mean = statistics.mean(times_by_cfg[name])
@@ -124,8 +123,8 @@ def experiment_1(seeds: List[int]) -> None:
 
     plt.figure(figsize=(8, 5))
     plt.boxplot(
-        [profits_by_cfg[name] for name, _, _, _ in configs],
-        labels=[name for name, _, _, _ in configs],
+        [profits_by_cfg[name] for name, _, _ in configs],
+        labels=[name for name, _, _ in configs],
     )
     plt.ylabel("Beneficio diario (EUR)")
     plt.title("Experimento 1: Beneficio según conjunto de operadores (HC)")
