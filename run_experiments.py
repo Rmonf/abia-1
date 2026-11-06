@@ -164,7 +164,7 @@ def experiment_2() -> None:
     for s in seeds:
         params = build_params(s)
 
-        # 1. Aleatoria (5 ejecuciones por semilla como recomienda la sección 7.5.1)
+        # 1. Aleatoria: RANDOM_REPS ejecuciones por semilla, porque depende del azar
         rand_init_p, rand_final_p, rand_t = [], [], []
         for rep in range(RANDOM_REPS):
             random.seed(s * 100 + rep)
