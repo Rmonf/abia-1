@@ -1,6 +1,7 @@
 """
 Script principal para ejecutar los 6 experimentos obligatorios de la práctica.
-Ejecutar con: python run_experiments.py
+Ejecutar con: python run_experiments.py        (todos)
+              python run_experiments.py N      (solo el experimento N, 1..6)
 """
 
 import os
@@ -35,6 +36,22 @@ BASE_CUSTOMERS = 1000
 BASE_CUST_PROPS = (0.25, 0.30, 0.45)
 BASE_GUARANTEED_PROP = 0.75
 REPLICAS = 10
+# Parámetros de SA si se lanzan los Exp. 5 o 6 sin el 3 (los mismos que su valor por defecto)
+DEFAULT_SA = (500.0, 0.001, 15000)
+
+
+def build_params(
+    seed: int,
+    plant_counts: Tuple[int, int, int] = BASE_PLANTS,
+    n_customers: int = BASE_CUSTOMERS,
+    **kwargs,
+) -> EnergyProblemParameters:
+    """Genera la instancia de una semilla. `kwargs` se pasan a EnergyProblemParameters."""
+    plants = generate_power_plants(plant_counts, seed=seed)
+    customers = generate_customers(
+        n_customers, BASE_CUST_PROPS, BASE_GUARANTEED_PROP, seed=seed
+    )
+    return EnergyProblemParameters(plants, customers, **kwargs)
 
 
 def get_feasible_seeds(
@@ -44,18 +61,14 @@ def get_feasible_seeds(
 ) -> List[int]:
     """
     Busca `n_needed` semillas cuyas instancias generadas aleatoriamente sean factibles
-    (es decir, donde quepan todos los clientes garantizados).
+    según el greedy (que consiga colocar a todos los garantizados). Que el greedy falle
+    no demuestra que la instancia sea infactible.
     """
     seeds = []
     candidate = 1
     while len(seeds) < n_needed:
-        plants = generate_power_plants(plant_counts, seed=candidate)
-        customers = generate_customers(
-            n_customers, BASE_CUST_PROPS, BASE_GUARANTEED_PROP, seed=candidate
-        )
-        params = EnergyProblemParameters(plants, customers)
         try:
-            generate_initial_state_greedy(params)
+            generate_initial_state_greedy(build_params(candidate, plant_counts, n_customers))
             seeds.append(candidate)
         except ValueError:
             pass
@@ -97,12 +110,8 @@ def experiment_1(seeds: List[int]) -> None:
     times_by_cfg = {name: [] for name, _ in configs}
 
     for s in seeds:
-        plants = generate_power_plants(BASE_PLANTS, seed=s)
-        customers = generate_customers(
-            BASE_CUSTOMERS, BASE_CUST_PROPS, BASE_GUARANTEED_PROP, seed=s
-        )
         for name, unass in configs:
-            params = EnergyProblemParameters(plants, customers, enable_unassign=unass)
+            params = build_params(s, enable_unassign=unass)
             random.seed(s)
             init_state = generate_initial_state_greedy(params)
             final_state, elapsed = run_hc(init_state)
@@ -142,11 +151,7 @@ def experiment_2(seeds: List[int]) -> None:
     times = {k: [] for k in strategies}
 
     for s in seeds:
-        plants = generate_power_plants(BASE_PLANTS, seed=s)
-        customers = generate_customers(
-            BASE_CUSTOMERS, BASE_CUST_PROPS, BASE_GUARANTEED_PROP, seed=s
-        )
-        params = EnergyProblemParameters(plants, customers)
+        params = build_params(s)
 
         # 1. Aleatoria (5 ejecuciones por semilla como recomienda la sección 7.5.1)
         rand_init_p, rand_final_p, rand_t = [], [], []
@@ -198,7 +203,7 @@ def experiment_3(seeds: List[int]) -> Tuple[float, float, int]:
     lam_values = [0.01, 0.001, 0.0002]
     limit = 15000
 
-    best_combo = (500.0, 0.001, limit)
+    best_combo = DEFAULT_SA
     best_mean_profit = float("-inf")
 
     for k in k_values:
@@ -206,11 +211,7 @@ def experiment_3(seeds: List[int]) -> Tuple[float, float, int]:
             profits = []
             elapsed_list = []
             for s in seeds:
-                plants = generate_power_plants(BASE_PLANTS, seed=s)
-                customers = generate_customers(
-                    BASE_CUSTOMERS, BASE_CUST_PROPS, BASE_GUARANTEED_PROP, seed=s
-                )
-                params = EnergyProblemParameters(plants, customers)
+                params = build_params(s)
                 init_state = generate_initial_state_greedy(params)
                 random.seed(s)
                 fin_state, elapsed = run_sa(init_state, k=k, lam=lam, limit=limit)
@@ -244,11 +245,7 @@ def experiment_4() -> None:
         seeds = get_feasible_seeds(REPLICAS, BASE_PLANTS, n_cust)
         t_list = []
         for s in seeds:
-            plants = generate_power_plants(BASE_PLANTS, seed=s)
-            customers = generate_customers(
-                n_cust, BASE_CUST_PROPS, BASE_GUARANTEED_PROP, seed=s
-            )
-            params = EnergyProblemParameters(plants, customers)
+            params = build_params(s, n_customers=n_cust)
             init_state = generate_initial_state_greedy(params)
             random.seed(s)
             _, elapsed = run_hc(init_state)
@@ -266,11 +263,7 @@ def experiment_4() -> None:
         seeds = get_feasible_seeds(REPLICAS, p_counts, BASE_CUSTOMERS)
         t_list = []
         for s in seeds:
-            plants = generate_power_plants(p_counts, seed=s)
-            customers = generate_customers(
-                BASE_CUSTOMERS, BASE_CUST_PROPS, BASE_GUARANTEED_PROP, seed=s
-            )
-            params = EnergyProblemParameters(plants, customers)
+            params = build_params(s, p_counts)
             init_state = generate_initial_state_greedy(params)
             random.seed(s)
             _, elapsed = run_hc(init_state)
@@ -308,15 +301,8 @@ def experiment_5(seeds: List[int], sa_params: Tuple[float, float, int]) -> None:
         hc_unserved, sa_unserved = [], []
         hc_valid_runs, sa_valid_runs = 0, 0
         for s in seeds:
-            plants = generate_power_plants(BASE_PLANTS, seed=s)
-            customers = generate_customers(
-                BASE_CUSTOMERS, BASE_CUST_PROPS, BASE_GUARANTEED_PROP, seed=s
-            )
-            params = EnergyProblemParameters(
-                plants,
-                customers,
-                unserved_guaranteed_penalty_per_mw=pen,
-                allow_unserved_guaranteed=True,
+            params = build_params(
+                s, unserved_guaranteed_penalty_per_mw=pen, allow_unserved_guaranteed=True
             )
 
             # Hill Climbing desde estado vacío
@@ -361,11 +347,7 @@ def experiment_6(seeds: List[int], sa_params: Tuple[float, float, int]) -> None:
         sa_profits, sa_times, sa_active_ab, sa_active_c = [], [], [], []
 
         for s in seeds:
-            plants = generate_power_plants(counts, seed=s)
-            customers = generate_customers(
-                BASE_CUSTOMERS, BASE_CUST_PROPS, BASE_GUARANTEED_PROP, seed=s
-            )
-            params = EnergyProblemParameters(plants, customers)
+            params = build_params(s, counts)
 
             # Hill Climbing
             random.seed(s)
@@ -400,14 +382,26 @@ def experiment_6(seeds: List[int], sa_params: Tuple[float, float, int]) -> None:
 
 
 if __name__ == "__main__":
-    print("Buscando 10 semillas factibles para el escenario base...")
-    base_seeds = get_feasible_seeds(REPLICAS, BASE_PLANTS, BASE_CUSTOMERS)
-    print(f"Semillas seleccionadas: {base_seeds}")
+    # Sin argumentos se lanzan todos; con un número, solo ese experimento
+    selected = [int(sys.argv[1])] if len(sys.argv) > 1 else [1, 2, 3, 4, 5, 6]
 
-    experiment_1(base_seeds)
-    experiment_2(base_seeds)
-    best_sa = experiment_3(base_seeds)
-    experiment_4()
-    experiment_5(base_seeds, best_sa)
-    experiment_6(base_seeds, best_sa)
-    print("\nTodos los experimentos han finalizado. Gráficas guardadas en PNG.")
+    base_seeds = []
+    if any(n != 4 for n in selected):
+        print("Buscando 10 semillas factibles (según el greedy) para el escenario base...")
+        base_seeds = get_feasible_seeds(REPLICAS, BASE_PLANTS, BASE_CUSTOMERS)
+        print(f"Semillas seleccionadas: {base_seeds}")
+
+    best_sa = DEFAULT_SA
+    if 1 in selected:
+        experiment_1(base_seeds)
+    if 2 in selected:
+        experiment_2(base_seeds)
+    if 3 in selected:
+        best_sa = experiment_3(base_seeds)
+    if 4 in selected:
+        experiment_4()
+    if 5 in selected:
+        experiment_5(base_seeds, best_sa)
+    if 6 in selected:
+        experiment_6(base_seeds, best_sa)
+    print("\nExperimentos finalizados.")
