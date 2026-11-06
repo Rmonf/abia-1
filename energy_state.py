@@ -181,18 +181,9 @@ class StateRepresentation(object):
                 counts[self.params.plants[j].plant_type] += 1
         return counts
 
-    def __eq__(self, other: object) -> bool:
-        return (
-            isinstance(other, StateRepresentation)
-            and self.assignment == other.assignment
-        )
-
-    def __hash__(self) -> int:
-        return hash(tuple(self.assignment))
-
     def __lt__(self, other: "StateRepresentation") -> bool:
-        if not isinstance(other, StateRepresentation):
-            return NotImplemented
+        # AIMA define Node.__lt__ comparando los estados; HC y SA no lo usan, pero así un
+        # Node con este estado se puede ordenar (p. ej. en una cola de prioridad) sin fallar.
         return self.assignment < other.assignment
 
     def __repr__(self) -> str:

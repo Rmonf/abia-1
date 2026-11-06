@@ -94,13 +94,3 @@ class EnergyProblemParameters(object):
             sorted(range(self.n_plants), key=lambda j: self.effective_demand[i][j])
             for i in range(self.n_customers)
         ]
-
-    def set_guaranteed_penalty(self, penalty_per_mw: float) -> None:
-        """Actualiza la penalización por MW para clientes garantizados no servidos (Exp. 5)."""
-        self.unserved_guaranteed_penalty_per_mw = penalty_per_mw
-        for i, c in enumerate(self.customers):
-            if c.contract_type == GUARANTEED:
-                self.customer_unserved_penalty[i] = c.demand_mw * penalty_per_mw
-                self.customer_service_gain[i] = (
-                    self.customer_served_revenue[i] + self.customer_unserved_penalty[i]
-                )
