@@ -103,12 +103,15 @@ class StateRepresentation(object):
     def generate_one_action(self) -> Generator[EnergyOperator, None, None]:
         """
         Generador de UN ÚNICO sucesor aleatorio para Simulated Annealing (Sesión 5).
-        Se elige un cliente y un destino al azar (-1 = desasignar) y se reintenta hasta que
-        el movimiento sea válido. En las instancias de la práctica siempre hay alguno (hay
-        centrales con capacidad libre), así que el bucle termina en pocos intentos.
+        Se elige un cliente y un destino al azar (-1 = desasignar) hasta dar con un
+        movimiento válido. Los intentos están acotados porque puede no haber ninguno
+        (p. ej. semilla 6: todas las centrales llenas y nada que desasignar); en ese caso
+        no se genera acción y el SA de AIMA se detiene. Con tantos intentos como acciones
+        posibles, que fallen todos habiendo alguna válida es prácticamente imposible.
         Usa el `random` global para que `random.seed(s)` haga reproducible la ejecución.
         """
-        while True:
+        n_attempts = self.params.n_customers * (self.params.n_plants + 1)
+        for _ in range(n_attempts):
             i = random.randrange(self.params.n_customers)
             j = random.randrange(-1, self.params.n_plants)
             curr_p = self.assignment[i]
