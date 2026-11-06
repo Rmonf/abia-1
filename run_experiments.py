@@ -316,10 +316,28 @@ def experiment_4() -> None:
 # ==============================================================================
 # EXPERIMENTO 5: Penalización en la heurística partiendo de solución vacía
 # ==============================================================================
+def guaranteed_penalty_threshold(params: EnergyProblemParameters) -> float:
+    """
+    Penalización P (EUR/MW) a partir de la cual servir al garantizado de menor demanda
+    compensa encender la central más cara: d_min * (tarifa + P) > max coste de activación.
+    """
+    guaranteed = [i for i in range(params.n_customers) if params.is_guaranteed[i]]
+    i_min = min(guaranteed, key=lambda i: params.customer_demand[i])
+    d_min = params.customer_demand[i_min]
+    tariff = params.customer_served_revenue[i_min] / d_min
+    return max(params.plant_activation_delta_cost) / d_min - tariff
+
+
 def experiment_5(seeds: List[int], sa_params: Tuple[float, float, int]) -> None:
     print("\n=== EXPERIMENTO 5: Solución Inicial Vacía y Penalización Garantizados ===")
-    penalties = [100.0, 500.0, 1000.0, 5000.0, 20000.0]
+    penalties = [100.0, 500.0, 1000.0, 5000.0, 20000.0, 40000.0, 50000.0, 100000.0]
     k, lam, limit = sa_params
+
+    thresholds = [guaranteed_penalty_threshold(build_params(s)) for s in seeds]
+    print(
+        f"  Umbral teórico de penalización: {min(thresholds):.0f} - {max(thresholds):.0f} EUR/MW "
+        f"(máximo entre semillas: {max(thresholds):.0f})"
+    )
 
     for pen in penalties:
         hc_unserved, sa_unserved = [], []
